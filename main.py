@@ -3,27 +3,31 @@ import io
 import pandas as pd
 from fastapi import FastAPI, UploadFile, Form, HTTPException, File
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, HTMLResponse
+from fastapi.responses import StreamingResponse, HTMLResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from openai import OpenAI
 from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+api_key = os.getenv("OPENAI_API_KEY")
+if not api_key:
+    raise RuntimeError("❌ OPENAI_API_KEY not found in environment variables")
+
+client = OpenAI(api_key=api_key)
 
 app = FastAPI(title="Cold Email Generator")
 
 # Allow frontend calls
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # for testing, allow all origins
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ✅ Serve static frontend files (put your index.html, CSS, JS inside a "static" folder)
+# ✅ Serve static frontend files (index.html, CSS, JS)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 def generate_cold_email(profile_text: str, prompt: str) -> str:
@@ -48,8 +52,16 @@ def generate_cold_email(profile_text: str, prompt: str) -> str:
 # ✅ Root route serves frontend
 @app.get("/", response_class=HTMLResponse)
 def root():
-    with open("static/index.html",encoding="utf-8") as f:
-        return f.read()
+    try:
+        with open("static/index.html", encoding="utf-8") as f:
+            return f.read()
+    except FileNotFoundError:
+        return HTMLResponse("<h1>⚠️ index.html not found in /static folder</h1>", status_code=404)
+
+# ✅ Add HEAD route (for health checks)
+@app.head("/", response_class=PlainTextResponse)
+def head_root():
+    return "OK"
 
 @app.post("/generate/")
 async def generate_emails(file: UploadFile = File(...), prompt: str = Form(...)):
@@ -58,7 +70,7 @@ async def generate_emails(file: UploadFile = File(...), prompt: str = Form(...))
         contents = await file.read()
         df = pd.read_excel(io.BytesIO(contents))
 
-        # Concatenate all columns
+        # Concatenate all columns into one text block
         df["combined_profile"] = df.astype(str).apply(lambda row: " | ".join(row.values), axis=1)
 
         # Generate cold emails
@@ -71,8 +83,9 @@ async def generate_emails(file: UploadFile = File(...), prompt: str = Form(...))
 
         return StreamingResponse(
             output,
-            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={"Content-Disposition": f"attachment; filename=output_with_emails.xlsx"}
+            media_type="application/octet-stream",
+            headers={"Content-Disposition": "attachment; filename=output_with_emails.xlsx"}
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
