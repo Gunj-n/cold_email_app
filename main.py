@@ -1,5 +1,6 @@
-import os
+import os 
 import io
+import re
 import pandas as pd
 from fastapi import FastAPI, UploadFile, Form, HTTPException, File
 from fastapi.middleware.cors import CORSMiddleware
@@ -39,7 +40,9 @@ def generate_cold_email(profile_text: str, prompt: str) -> str:
                 {"role": "system", "content": (
                     "You are an expert B2B outbound copywriter. "
                     "Write short, high-conversion cold emails. "
-                    "Use a warm, human tone. Personalize with specifics from the prospect's role, company, experience, etc."
+                    "Always return in format:\n"
+                    "Subject: <short catchy subject>\n\n"
+                    "Body:\n<email body, no signature> "
                 )},
                 {"role": "user", "content": f"Prompt: {prompt}\n\nProfile:\n{profile_text}"}
             ],
@@ -48,6 +51,25 @@ def generate_cold_email(profile_text: str, prompt: str) -> str:
         return response.choices[0].message.content.strip()
     except Exception as e:
         return f"ERROR: {str(e)}"
+
+def parse_email(text: str):
+    """Extract subject and body from generated email text."""
+    subject = ""
+    body = text
+
+    # Find subject
+    match = re.search(r"(?i)subject\s*:\s*(.+)", text)
+    if match:
+        subject = match.group(1).strip()
+        body = re.sub(r"(?i)subject\s*:.+\n?", "", text).strip()
+
+    # Remove "Body:" if present
+    body = re.sub(r"(?i)^body\s*:\s*", "", body).strip()
+
+    # Remove signatures like "Best," / "Thanks," / "Regards,"
+    body = re.sub(r"\n(?:best|thanks|regards|sincerely|cheers)[\s,].*", "", body, flags=re.I | re.S).strip()
+
+    return subject, body
 
 # ✅ Root route serves frontend
 @app.get("/", response_class=HTMLResponse)
@@ -73,8 +95,16 @@ async def generate_emails(file: UploadFile = File(...), prompt: str = Form(...))
         # Concatenate all columns into one text block
         df["combined_profile"] = df.astype(str).apply(lambda row: " | ".join(row.values), axis=1)
 
-        # Generate cold emails
-        df["cold_email"] = df["combined_profile"].apply(lambda text: generate_cold_email(text, prompt))
+        # Generate cold emails and parse subject/body
+        results = df["combined_profile"].apply(lambda text: generate_cold_email(text, prompt))
+        parsed = results.apply(parse_email)
+
+        # Create new clean columns
+        df["subject"] = parsed.apply(lambda x: x[0])
+        df["email"] = parsed.apply(lambda x: x[1])
+
+        # Drop helper columns
+        df.drop(columns=["combined_profile"], inplace=True)
 
         # Save to BytesIO
         output = io.BytesIO()
@@ -84,8 +114,7 @@ async def generate_emails(file: UploadFile = File(...), prompt: str = Form(...))
         return StreamingResponse(
             output,
             media_type="application/octet-stream",
-            headers={"Content-Disposition": "attachment; filename=output_with_emails.xlsx"}
+            headers={"Content-Disposition": "attachment; filename=output_with_subject_email.xlsx"}
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
