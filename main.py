@@ -35,7 +35,7 @@ def generate_cold_email(profile_text: str, prompt: str) -> str:
     """Generate cold email using OpenAI API based on profile text and custom prompt."""
     try:
         response = client.chat.completions.create(
-            model="gpt-4o",
+            model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": (
                     "You are an expert B2B outbound copywriter. "
@@ -118,3 +118,4 @@ async def generate_emails(file: UploadFile = File(...), prompt: str = Form(...))
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
