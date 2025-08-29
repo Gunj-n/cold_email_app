@@ -123,10 +123,11 @@ async def generate_emails(file: UploadFile = File(...), prompt: str = Form(...))
         return StreamingResponse(
             output,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={"Content-Disposition": "attachment; filename=output_with_subject_email.xlsx"}
+            headers={"Content-Disposition": "attachment; filename=output_with_emails.xlsx"}
         )
 
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
+
